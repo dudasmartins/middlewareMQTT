@@ -1,4 +1,4 @@
-import rypc
+import rpyc
 from cassandra.cluster import Cluster
 from cryptography.fernet import Fernet
 
@@ -11,12 +11,6 @@ class servidorRPC(rpyc.Service):
     def __init__(self, cipher_key):
         super().__init__()
         self.cipher_key = cipher_key
-
-    def on_connect(self, conn):
-        pass
-
-    def on_disconnect(self, conn):
-        pass
 
     # # Salvar dados criptografados no Cassandra
     # def exposed_salvar_dados_criptografados(self, dado_criptografado):
@@ -39,5 +33,5 @@ chave_criptografia = b'9i7e0z0FtQNjj85riGhBy7ZAdxTs8gPSg7BFIUrvka8='
 if __name__ == "__main__":
     from rpyc.utils.server import ThreadedServer
 
-    server = ThreadedServer(ServidorRPC(chave_criptografia), port=18862)
-    server.start()
+server = ThreadedServer(servidorRPC(chave_criptografia), port=18862)
+server.start()

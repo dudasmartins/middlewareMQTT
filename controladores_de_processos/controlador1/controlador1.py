@@ -22,31 +22,18 @@ cipher = Fernet(chave_criptografia)
 
 ##callback quando o cliente MQTT se conecta ao servidor MQTT
 def on_connect(client, userdata, flags, rc):
-    client.subscribe("/saude")
+    client.subscribe("/nivel_oxigenio")
 
 def on_message(client, userdata, msg):
     dado = msg.payload.decode()
     dado_descriptografado = decrypt_msg(dado)
 
-    if dado_descriptografado:
-        print("Dados recebidos:", dado_descriptografado)
 
-        salvar_dados_cassandra(*map(float, dado_descriptografado.split(',')))
+def salvar_dados_cassandra(dados):
+    nivel_oxigenio = int(dados.split(',')[0])
+    data_atual = dados.split(',')[1]
 
-
-def decrypt_msg(msg):
-    try:
-        dado_descriptografado = cipher.decrypt(msg.encode()).decode()
-        return dado_descriptografado
-    except InvalidToken:
-        print("Erro na descriptografia. Mensagem descartada.")
-        return None
-
-def salvar_dados_cassandra(saturacao, insulina, pressao_sistolica, pressao_diastolica, data_atual):
-    query = f"""
-    INSERT INTO old_people (saturacao, insulina, pressao_sistolica, pressao_diastolica, data_hora)
-    VALUES ({saturacao}, {insulina}, {pressao_sistolica}, {pressao_diastolica}, '{data_atual}');
-    """
+    publica_nivel_oxigenio_atuador(nivel_oxigenio, data_atual)
 
     try:
         session.execute(query)
@@ -55,30 +42,20 @@ def salvar_dados_cassandra(saturacao, insulina, pressao_sistolica, pressao_diast
         print(f"Erro ao salvar dados no Cassandra: {e}")
 
 
+def publica_nivel_oxigenio_atuador(nivel_oxigenio, data_atual):
+    if (nivel_oxigenio < 70()):
+        print("Enviado: " + str(nivel_oxigenio))
+        dados_enviar = f'{str(nivel_oxigenio)},{data_atual}'
+        client.publish("", dados_enviar)
+    else:
+        print('Não é necessário publicar')
 
-#callback quando uma mensagem é recebia no tópico "/saude"
-# def on_message(client, userdata, msg):
-
-# def publica_dados_idosos_atuador(saturacao, insulina, pressao_sistolica, pressao_diastolica, data_atual):
-#     #ativar o atuador com base nos dados do idoso
-#     if(
-#         float(saturacao) < 95.0
-#         or float(insulina) > 130.0
-#         or int(pressao_sistolica) > 120
-#         or int(pressao_diastolica) > 80
-#     ):
-#         print("atuador ativado: dados fora dos limites desejados")
-#         dados_enviar = f"{saturacao},{insulina},{pressao_sistolica},{pressao_diastolica},{data_atual}"
-#         client.publish("/ativo_idoso", dados_enviar)
-#     else:
-#         print("Dados dentro dos limites desejados. Atuador não ativado.")
-
-# Configuração do cliente MQTT
+    # Configuração do cliente MQTT
 
 
-client = mqtt.Client("Gerador_Dados")
+client = mqtt.Client()
+client.connect(broker_mqtt, port_mqtt)
 client.on_connect = on_connect
 client.on_message = on_message
-client.connect(broker_mqtt, port_mqtt)
-
+client.on_publish = on_publish
 client.loop_forever()
