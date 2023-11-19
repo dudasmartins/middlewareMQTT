@@ -2,33 +2,40 @@ import rpyc
 from cassandra.cluster import Cluster
 from cryptography.fernet import Fernet
 
-#parâmetros de conexão banco de dados
-cluster = Cluster(['172.19.0.2'])  # endereço servidor cassandra
-session = cluster.connect('data')  # "keyspace" banco de dados
-
+#parâmetros banco de dados
+cluster = Cluster(['cassandra-node1', 'cassandra-node2'])
+session = cluster.connect()
+db_name = "dados" #Keyspace
+table_name = "dados_idosos"
 
 class servidorRPC(rpyc.Service):
     def __init__(self, cipher_key):
         super().__init__()
         self.cipher_key = cipher_key
 
-    # # Salvar dados criptografados no Cassandra
-    # def exposed_salvar_dados_criptografados(self, dado_criptografado):
-    #     try:
-    #         cipher = Fernet(self.cipher_key)
-    #         dado_descriptografado = cipher.decrypt(dado_criptografado.encode()).decode()
-    #         salvar_dados_cassandra(*map(float, dado_descriptografado.split(',')))
-    #         return True
-    #     except Exception as e:
-    #         print(f"Erro ao salvar dados no Cassandra: {e}")
-    #         return False
+    def exposed_visualizar_dados():
+        try:
+            # Conectar ao cluster Cassandra com fallback para o segundo nó em caso de falha
+            cluster = Cluster(['cassandra-node1', 'cassandra-node2'])
+            session = cluster.connect('dados')
 
-    # Função para salvar dados no Cassandra
+            # Query para selecionar todos os dados da tabela
+            query = f"SELECT * FROM {table_name}"
+            rows = session.execute(query)
 
-    def exposed_retorna_todos_os_dados():
-        select_query = "SELECT * FROM old_people;"
+            # Converter os resultados em uma lista de dicionários
+            dados = [{'id': str(row.id), 'nivel_oxigenio': row.nivel_oxigenio, 'data_atual': row.data_atual} for row in rows]
 
-chave_criptografia = b'9i7e0z0FtQNjj85riGhBy7ZAdxTs8gPSg7BFIUrvka8='
+            return dados
+
+        except Exception as e:
+            return f'Erro ao visualizar dados: {e}'
+
+        finally:
+            cluster.shutdown()
+
+
+
 
 if __name__ == "__main__":
     from rpyc.utils.server import ThreadedServer
