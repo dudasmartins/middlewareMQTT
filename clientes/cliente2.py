@@ -1,5 +1,6 @@
 import rpyc
 import json
+from cassandra.cluster import Cluster
 
 porta_control1 = 18861
 

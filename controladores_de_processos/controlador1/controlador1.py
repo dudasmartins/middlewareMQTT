@@ -4,135 +4,156 @@ from datetime import datetime
 import rpyc
 from cryptography.fernet import Fernet, InvalidToken
 from cassandra.cluster import Cluster
+import uuid
 
+class SensorController:
+    def __init__(self):
+        self.cluster_ips = ['172.20.0.2', '172.20.0.3']
+        self.db_name = "dados"
+        self.table_name = "dados_idosos"
+        self.chave_criptografia = '9i7e0z0FtQNjj85riGhBy7ZAdxTs8gPSg7BFIUrvka8='.encode()
+        self.cipher = Fernet(self.chave_criptografia)
 
-#configuração banco cassandra
-cluster = Cluster(['cassandra-node1', 'cassandra-node2'])
-session = cluster.connect()
-db_name = "dados"  # Substitua pelo nome do seu keyspace
-table_name = "dados_idosos"
+        # Configuração do MQTT
+        self.broker_mqtt = "localhost"
+        self.port_mqtt = 1883
 
-session.set_keyspace(db_name)
+        # Configuração do Cassandra
+        self.cluster = Cluster(self.cluster_ips)
+        self.session = self.cluster.connect()
+        self.session.execute(f"""
+            CREATE KEYSPACE IF NOT EXISTS {self.db_name}
+            WITH REPLICATION = {{ 'class' : 'SimpleStrategy', 'replication_factor' : 3 }}
+        """)
+        self.session.set_keyspace(self.db_name)
+        self.session.execute(f"""
+            CREATE TABLE IF NOT EXISTS {self.table_name} (
+                id UUID PRIMARY KEY,
+                nivel_oxigenio INT,
+                data_atual TIMESTAMP
+            )
+        """)
 
-session.execute("""
-    CREATE KEYSPACE IF NOT EXISTS %s
-    WITH REPLICATION = { 'class' : 'SimpleStrategy', 'replication_factor' : 3 }
-""" % db_name)
+        # Configuração do MQTT Client
+        self.mqtt_client = mqtt.Client()
+        self.mqtt_client.on_connect = self.on_connect
+        self.mqtt_client.on_message = self.on_message
+        self.mqtt_client.connect(self.broker_mqtt, self.port_mqtt)
+        self.mqtt_client.loop_start()
 
-session.execute("""
-    CREATE TABLE IF NOT EXISTS %s (
-        id UUID PRIMARY KEY,
-        nivel_oxigenio INT,
-        data_atual TIMESTAMP
-    )
-""" % table_name)
+    def on_connect(self, client, userdata, flags, rc):
+        self.mqtt_client.subscribe("/nivel_oxigenio")
 
-# Conexão com o mqtt-server
-broker_mqtt = "localhost"
-port_mqtt = 1883
+    def on_message(self, client, userdata, msg):
+        dado = msg.payload.decode()
+        dados_descriptografado = self.decrypt_msg(dado)
 
-portRPC = 18861
-
-chave_criptografia = b'9i7e0z0FtQNjj85riGhBy7ZAdxTs8gPSg7BFIUrvka8='
-cipher = Fernet(chave_criptografia)
-
-## Callback quando o cliente MQTT se conecta ao servidor MQTT
-def on_connect(client, userdata, flags, rc):
-    client.subscribe("/nivel_oxigenio")
-
-def on_message(client, userdata, msg):
-    dado = msg.payload.decode()
-    dado_descriptografado = decrypt_msg(dado)
-
-##################CRIPTOGRAFIA##################
-
-def decrypt_msg(dado):
-    chave_criptografia = b'9i7e0z0FtQNjj85riGhBy7ZAdxTs8gPSg7BFIUrvka8='.encode()
-    cipher = Fernet(chave_criptografia)
-
-    try:
-        dado_decrypt = cipher.decrypt(dado).decode()
-
-        if(verifica_padrao_crypto(dado_decrypt)):
-            return dado_decrypt
-
+        if dados_descriptografado:
+            self.salvar_dados_cassandra(dados_descriptografado)
         else:
-            return False
-    except InvalidToken:
-        print('Token não reconhecido')
+            print("Dados não reconhecidos.")
 
-def verifica_padrao_crypto(data):
-    padrao = r'^\d+,\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$'
-    correspondencia = re.match(padrao, data)
-    return bool(correspondencia)
+    def decrypt_msg(self, dado):
+        try:
+            dado_decrypt = self.cipher.decrypt(dado.encode()).decode()
 
-##################SALVAR NO BANCO DE DADOS##################
+            if self.verifica_padrao_crypto(dado_decrypt):
+                return dado_decrypt
+            else:
+                return False
+        except InvalidToken:
+            print('Token não reconhecido')
 
-def salvar_dados_cassandra(dados):
-    nivel_oxigenio = int(dados.split(',')[0])
-    data_atual = dados.split(',')[1]
+    def verifica_padrao_crypto(self, data):
+        padrao = r'^\d+,\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$'
+        correspondencia = re.match(padrao, data)
+        return bool(correspondencia)
 
-    publica_nivel_oxigenio_atuador(nivel_oxigenio, data_atual)
+    def publica_nivel_oxigenio_atuador(self, nivel_oxigenio, data_atual):
+        if nivel_oxigenio < 70:
+            print("Enviado: " + str(nivel_oxigenio))
+            dados_enviar = f'{str(nivel_oxigenio)},{data_atual}'
+            self.mqtt_client.publish("/notificacao", dados_enviar)
+        else:
+            print('Não é necessário publicar')
 
-    try:
-        # Gera um UUID único para cada registro
-        id_unico = uuid.uuid4()
+    def verifica_conexao_nos(self):
+        nodos_ativos = []
+        for ip in self.cluster_ips:
+            try:
+                # Tenta conectar ao nó
+                cluster = Cluster([ip])
+                session = cluster.connect()
+                print(f"Conexão bem-sucedida com o nó {ip}!")
+                nodos_ativos.append(ip)
+                # Fecha a conexão após a verificação bem-sucedida
+                cluster.shutdown()
+            except Exception as e:
+                print(f"Erro ao conectar ao nó {ip}: {e}")
 
-        # Insere os dados na tabela
-        session.execute("""
-            INSERT INTO %s (id, nivel_oxigenio, data_atual)
-            VALUES (%s, %s, %s)
-        """ % (table_name, id_unico, nivel_oxigenio, data_atual))
+            if nodos_ativos:
+                print(f"Nodos ativos: {nodos_ativos}")
+                if len(nodos_ativos) == 2:
+                    print("Ambos os nodos estão ativos.")
+                elif len(nodos_ativos) == 1:
+                    print("Apenas um nó está ativo.")
+                else:
+                    print("Número inesperado de nodos ativos.")
+            else:
+                print("Nenhum nó ativo.")
 
-        print("Dados salvos no banco de dados.")
-    except Exception as e:
-        print(f"Erro ao salvar dados: {e}")
+    def salvar_dados_cassandra(self, dados):
+        nivel_oxigenio = int(dados.split(',')[0])
+        data_atual = dados.split(',')[1]
+        data_atual_formatada = f"'{data_atual}'"
 
-##################PUBLICA DADOS NO ATUADOR##################
+        try:
+            # Gera um UUID único para cada registro
+            id_unico = uuid.uuid4()
 
-def publica_nivel_oxigenio_atuador(nivel_oxigenio, data_atual):
-    if (nivel_oxigenio < 70):
-        print("Enviado: " + str(nivel_oxigenio))
-        dados_enviar = f'{str(nivel_oxigenio)},{data_atual}'
-        client.publish("", dados_enviar)
-    else:
-        print('Não é necessário publicar')
+            # Insere os dados na tabela
+            self.session.execute(f"""
+            INSERT INTO {self.table_name} (id, nivel_oxigenio, data_atual)
+            VALUES ({id_unico}, {nivel_oxigenio}, {data_atual_formatada})
+            """)
+            print("Dados salvos no banco de dados.")
+            self.publica_nivel_oxigenio_atuador(nivel_oxigenio, data_atual)
+            self.verifica_conexao_nos()
+            self.verifica_sincronizacao_cluster()
 
-##################VERIFICAR CONEXÃO BANCO DE DADOS##################
+        except Exception as e:
+            print(f"Erro ao salvar dados: {e}")
 
-# def verificar_conexao_cassandra():
-    # try:
-    #     cluster = Cluster(['cassandra-node1', 'cassandra-node2'])
-    #     session = cluster.connect()
+    def verifica_sincronizacao_cluster(self):
+            try:
+                # Use o primeiro nó para obter os dados da tabela
+                cluster = Cluster([self.cluster_ips[0]])
+                session = cluster.connect(self.keyspace)
+                query_select_data = f"SELECT * FROM {self.table};"
+                data_node_0 = session.execute(query_select_data).all()
 
-    #     keyspace = 'dados'
+                # Verifica se todos os nós têm os mesmos dados na tabela
+                for ip in self.cluster_ips[1:]:
+                    cluster = Cluster([ip])
+                    session = cluster.connect(self.keyspace)
+                    data_node_i = session.execute(query_select_data).all()
 
-    #     # Execute uma consulta simples para verificar a conexão
-    #     rows = session.execute('SELECT cluster_name FROM system.local')
+                    if data_node_i != data_node_0:
+                        print(f"Nó {ip} não está sincronizado em termos de dados da tabela {self.table}.")
 
-    #     # Verificar se a consulta foi bem-sucedida
-    #     for row in rows:
-    #         cluster_name = row.cluster_name
-    #         print(f'Conexão com o Cassandra está ativa. Cluster: {cluster_name}')
-    #         return True
+                print("Verificação de sincronização concluída.")
+            except Exception as e:
+                print(f"Erro ao conectar ao cluster: {e}")
 
-    # except Exception as e:
-    #     print(f'Erro ao conectar ao Cassandra: {e}')
-    #     return False
+# Criar uma instância da classe SensorController
+sensor_controller = SensorController()
 
-    # finally:
-    #     # Sempre feche a conexão no bloco finally para evitar vazamentos
-    #     cluster.shutdown()
+# Manter o programa em execução indefinidamente
+try:
+    while True:
+        pass
+except KeyboardInterrupt:
+    print("Programa interrompido pelo usuário.")
 
-##################SINCRONIZA BANCO DE DADOS##################
-
-def verifica_sincronizacao_bd():
-    pass
-
-
-client = mqtt.Client()
-client.connect(broker_mqtt, port_mqtt)
-client.on_connect = on_connect
-client.on_message = on_message
-client.on_publish = on_publish
-client.loop_forever()
+# Fechar a conexão com o Cassandra ao encerrar o programa
+sensor_controller.cluster.shutdown()

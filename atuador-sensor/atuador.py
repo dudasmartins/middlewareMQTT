@@ -14,8 +14,8 @@ def on_message(client, userdata, msg):
     nivel_oxigenio = dados.split(',')[0]
     data_atual = dados.split(',')[1]
 
-    print('-------------------')
-    print('Gerando notificação para o responsável...')
+    print('#########################################')
+    print('Gerando notificação para o responsável!')
     print(f'Nível de oxigênio: {nivel_oxigenio} | Data: {data_atual}')
 
 client = mqtt.Client()
