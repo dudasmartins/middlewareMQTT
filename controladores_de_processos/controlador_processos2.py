@@ -41,6 +41,7 @@ class SensorController:
         self.mqtt_client.connect(self.broker_mqtt, self.port_mqtt)
         self.mqtt_client.loop_start()
 
+    #topico do sensor
     def on_connect(self, client, userdata, flags, rc):
         self.mqtt_client.subscribe("/nivel_oxigenio")
 
@@ -53,6 +54,7 @@ class SensorController:
         else:
             print("Dados não reconhecidos.")
 
+    #verificação token 
     def decrypt_msg(self, dado):
         try:
             dado_decrypt = self.cipher.decrypt(dado.encode()).decode()
@@ -64,11 +66,13 @@ class SensorController:
         except InvalidToken:
             print('Token não reconhecido')
 
+    #verifica se os dados seguem o padrão de "número,yyyyy,mm-dd hh:mm:ss"
     def verifica_padrao_crypto(self, data):
         padrao = r'^\d+,\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$'
         correspondencia = re.match(padrao, data)
         return bool(correspondencia)
 
+    #se o nivel de oxigenio for inferior a 70, publica no topico de notificacao que está no controlador de processos
     def publica_nivel_oxigenio_atuador(self, nivel_oxigenio, data_atual):
         if nivel_oxigenio < 70:
             print("Enviado: " + str(nivel_oxigenio))
@@ -77,7 +81,10 @@ class SensorController:
         else:
             print('Não é necessário publicar')
 
+    #verifica a conexão dos nós que estão os banco de dados
     def verifica_conexao_nos(self):
+
+        #armazena os IPS na lista
         nodos_ativos = []
         for ip in self.cluster_ips:
             try:
@@ -86,6 +93,7 @@ class SensorController:
                 session = cluster.connect()
                 print(f"Conexão bem-sucedida com o nó {ip}!")
                 nodos_ativos.append(ip)
+
                 # Fecha a conexão após a verificação bem-sucedida
                 cluster.shutdown()
             except Exception as e:
@@ -97,8 +105,6 @@ class SensorController:
                     print("Ambos os nodos estão ativos.")
                 elif len(nodos_ativos) == 1:
                     print("Apenas um nó está ativo.")
-                else:
-                    print("Número inesperado de nodos ativos.")
             else:
                 print("Nenhum nó ativo.")
 
@@ -108,10 +114,9 @@ class SensorController:
         data_atual_formatada = f"'{data_atual}'"
 
         try:
-            # Gera um UUID único para cada registro
             id_unico = uuid.uuid4()
 
-            # Insere os dados na tabela
+            #insere os dados na tabela
             self.session.execute(f"""
             INSERT INTO {self.table_name} (id, nivel_oxigenio, data_atual)
             VALUES ({id_unico}, {nivel_oxigenio}, {data_atual_formatada})
@@ -128,11 +133,15 @@ class SensorController:
             try:
                 cluster = Cluster([ip])
                 session = cluster.connect()
-                # Consulta para obter informações sobre o estado do cluster
+
+                # consulta para obter informações sobre o estado do cluster
                 query = "SELECT * FROM system.peers;"
                 rows = session.execute(query)
-                # Verifica se todos os nós estão sincronizados
+
+                # verifica se todos os nós estão sincronizados (mesmas informações na tabela)
                 for row in rows:
+
+                    #verifica o nó selecionado com o primeiro nó na lista
                     if not row.is_alive or not row.is_bootstrapping or row.schema_version != rows[0].schema_version:
                         print(f"Nó {row.peer} não está sincronizado.")
                 cluster.shutdown()
@@ -151,5 +160,4 @@ try:
 except KeyboardInterrupt:
     print("Programa interrompido pelo usuário.")
 
-# Fechar a conexão com o Cassandra ao encerrar o programa
 sensor_controller.cluster.shutdown()

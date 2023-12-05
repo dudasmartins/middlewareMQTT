@@ -35,5 +35,5 @@ if __name__ == "__main__":
     from rpyc.utils.server import ThreadedServer
 
 print("Iniciando o servidor")
-server = ThreadedServer(servidorRPC, port=18861)
+server = ThreadedServer(servidorRPC, port=18863)
 server.start()

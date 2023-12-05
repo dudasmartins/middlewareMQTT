@@ -14,9 +14,8 @@ class SensorController:
         self.chave_criptografia = '9i7e0z0FtQNjj85riGhBy7ZAdxTs8gPSg7BFIUrvka8='.encode()
         self.cipher = Fernet(self.chave_criptografia)
 
-        # Configuração do MQTT
         self.broker_mqtt = "localhost"
-        self.port_mqtt = 1883
+        self.port_mqtt = 1882
 
         # Configuração do Cassandra
         self.cluster = Cluster(self.cluster_ips)
@@ -79,6 +78,7 @@ class SensorController:
 
     def verifica_conexao_nos(self):
         nodos_ativos = []
+
         for ip in self.cluster_ips:
             try:
                 # Tenta conectar ao nó
@@ -91,16 +91,17 @@ class SensorController:
             except Exception as e:
                 print(f"Erro ao conectar ao nó {ip}: {e}")
 
-            if nodos_ativos:
-                print(f"Nodos ativos: {nodos_ativos}")
-                if len(nodos_ativos) == 2:
-                    print("Ambos os nodos estão ativos.")
-                elif len(nodos_ativos) == 1:
-                    print("Apenas um nó está ativo.")
-                else:
-                    print("Número inesperado de nodos ativos.")
+        if nodos_ativos:
+            print(f"Nodos ativos: {nodos_ativos}")
+            if len(nodos_ativos) == 2:
+                print("Ambos os nodos estão ativos.")
+            elif len(nodos_ativos) == 1:
+                print("Apenas um nó está ativo.")
             else:
-                print("Nenhum nó ativo.")
+                print("Número inesperado de nodos ativos.")
+        else:
+            print("Nenhum nó ativo.")
+
 
     def salvar_dados_cassandra(self, dados):
         nivel_oxigenio = int(dados.split(',')[0])
@@ -125,35 +126,37 @@ class SensorController:
             print(f"Erro ao salvar dados: {e}")
 
     def verifica_sincronizacao_cluster(self):
-            try:
-                # Use o primeiro nó para obter os dados da tabela
-                cluster = Cluster([self.cluster_ips[0]])
-                session = cluster.connect(self.keyspace)
-                query_select_data = f"SELECT * FROM {self.table};"
-                data_node_0 = session.execute(query_select_data).all()
+        try:
+            # Use o primeiro nó para obter os dados da tabela
+            cluster = Cluster([self.cluster_ips[0]])
+            session = cluster.connect(self.db_name)
+            query_select_data = f"SELECT * FROM {self.table_name};"
+            data_node_0 = session.execute(query_select_data).all()
 
-                # Verifica se todos os nós têm os mesmos dados na tabela
-                for ip in self.cluster_ips[1:]:
+            # Verifica se todos os nós têm os mesmos dados na tabela
+            for ip in self.cluster_ips[1:]:
+                try:
                     cluster = Cluster([ip])
-                    session = cluster.connect(self.keyspace)
+                    session = cluster.connect(self.db_name)
                     data_node_i = session.execute(query_select_data).all()
 
                     if data_node_i != data_node_0:
-                        print(f"Nó {ip} não está sincronizado em termos de dados da tabela {self.table}.")
+                        print(f"Nó {ip} não está sincronizado em termos de dados da tabela {self.table_name}.")
 
-                print("Verificação de sincronização concluída.")
-            except Exception as e:
-                print(f"Erro ao conectar ao cluster: {e}")
+                except Exception as e:
+                    print(f"Erro ao conectar ao nó {ip}: {e}")
 
-# Criar uma instância da classe SensorController
+            print("Verificação de sincronização concluída. Os dois bancos possuem os mesmos dados.")
+
+        except Exception as e:
+            print(f"Erro ao conectar ao cluster: {e}")
+
 sensor_controller = SensorController()
 
-# Manter o programa em execução indefinidamente
 try:
     while True:
         pass
 except KeyboardInterrupt:
     print("Programa interrompido pelo usuário.")
 
-# Fechar a conexão com o Cassandra ao encerrar o programa
 sensor_controller.cluster.shutdown()
